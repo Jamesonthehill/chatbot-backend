@@ -3,35 +3,38 @@ import cors from "cors";
 import OpenAI from "openai";
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
-app.use(cors());
+// ✅ CORS (allow your GitHub Pages domain)
+app.use(cors({
+  origin: ["https://jamesonthehill.com", "http://localhost:5173", "http://localhost:3000"],
+  methods: ["POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
+
 app.use(express.json());
 
-// OpenAI client
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 app.post("/api/chat", async (req, res) => {
   try {
-    const userMessage = req.body.message ?? "";
+    const messages = Array.isArray(req.body.messages) ? req.body.messages : [];
+    // messages: [{ role: "user"|"assistant", content: "..." }, ...]
 
-    // Use simple string input (easier & safe)
-    const response = await client.responses.create({
-      model: "gpt-4.1-mini",
-      input: `You are a helpful chatbot for my website. Answer briefly and clearly.\nUser: ${userMessage}`,
+    const completion = await client.chat.completions.create({
+      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+      messages: [
+        { role: "system", content: "You are a helpful chatbot for my website. Answer briefly and clearly." },
+        ...messages,
+      ],
     });
 
-    const replyText = response.output[0]?.content[0]?.text ?? "";
-
-    res.json({ reply: replyText });
+    const reply = completion.choices?.[0]?.message?.content ?? "";
+    res.json({ reply });
   } catch (err) {
     console.error("Error from /api/chat:", err);
-    res.status(500).json({ reply: null, error: err.message });
+    res.status(500).json({ reply: null, error: err?.message || "server error" });
   }
 });
 
-app.listen(port, () => {
-  console.log(`Server listening on http://localhost:${port}`);
-});
+app.listen(port, () => console.log(`Server listening on ${port}`));
