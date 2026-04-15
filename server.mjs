@@ -2,16 +2,11 @@ import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
 import pg from "pg";
-import { randomUUID } from "crypto";
 
 const app = express();
 const port = process.env.PORT || 3000;
 const { Pool } = pg;
-
-
-/* -------------------------------
-   CORS (allow your website)
--------------------------------- */
+// ✅ CORS: allow your website origins (add/remove as needed)
 const ALLOWED_ORIGINS = [
   "https://jamesonthehill.com",
   "https://jamesonthehill.github.io",
@@ -26,109 +21,39 @@ app.use(
         if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
         return cb(new Error("CORS blocked: " + origin), false);
       },
-      methods: ["GET", "POST", "OPTIONS"],
+      methods: ["POST", "OPTIONS"],
       allowedHeaders: ["Content-Type"],
     })
 );
 
-// ✅ preflight (avoid the "*" crash you hit earlier)
-app.options(/.*/, cors());
+app.options(/.*/, cors()); // ✅ handle preflight
 app.use(express.json());
 
-/* -------------------------------
-   OpenAI
--------------------------------- */
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-/* -------------------------------
-   Postgres (Render)
-   Set DATABASE_URL in Render env
--------------------------------- */
-const dbUrl = process.env.DATABASE_URL;
-if (!dbUrl) throw new Error("DATABASE_URL missing");
-
-const pool = new Pool({
-  connectionString: dbUrl,
-  ssl: dbUrl.includes(".render.com") ? { rejectUnauthorized: false } : undefined,
-});
-
-/* -------------------------------
-   Health / DB Ping
--------------------------------- */
+// (optional) health check
 app.get("/", (req, res) => res.send("OK"));
 
-app.get("/api/db/ping", async (req, res) => {
-  const r = await pool.query("SELECT NOW() as now");
-  res.json(r.rows[0]);
-});
-
-/* -------------------------------
-   (Optional) Thread APIs
-   Requires tables: chat_threads, chat_messages
--------------------------------- */
-app.get("/api/chat/threads", async (req, res) => {
-  const { rows } = await pool.query(
-      "SELECT id, created_at FROM chat_threads ORDER BY created_at DESC LIMIT 50"
-  );
-  res.json({ threads: rows });
-});
-
-app.get("/api/chat/threads/:id/messages", async (req, res) => {
-  const { id } = req.params;
-  const { rows } = await pool.query(
-      "SELECT role, content, created_at FROM chat_messages WHERE thread_id=$1 ORDER BY created_at ASC",
-      [id]
-  );
-  res.json({ messages: rows });
-});
-
-/* -------------------------------
-   Main chat endpoint
-   Supports BOTH payload styles:
-   1) { message: "hi" }
-   2) { threadId, messages: [{role, content}, ...] }
--------------------------------- */
 app.post("/api/chat", async (req, res) => {
   try {
-    // payload
-    const incomingThreadId = req.body.threadId;
+    // ✅ Support BOTH payload styles:
+    // 1) { message: "hi" }              (your old index.html)
+    // 2) { messages: [{role,content}] } (your React widget)
     let messages = Array.isArray(req.body.messages) ? req.body.messages : [];
     const single = typeof req.body.message === "string" ? req.body.message : "";
 
-    // normalize messages
+    // If only {message} was provided, convert to messages format
     if (messages.length === 0 && single.trim()) {
       messages = [{ role: "user", content: single.trim() }];
     }
 
-    // determine threadId
-    const threadId = incomingThreadId || randomUUID();
-
-    // pick the latest user message text
-    const lastUser = [...messages].reverse().find((m) => m?.role === "user");
-    const userText = (lastUser?.content || "").trim();
-
-    // create thread row if missing
-    await pool.query(
-        "INSERT INTO chat_threads (id) VALUES ($1) ON CONFLICT DO NOTHING",
-        [threadId]
-    );
-
-    // save user message (only if non-empty)
-    if (userText) {
-      await pool.query(
-          "INSERT INTO chat_messages (id, thread_id, role, content) VALUES ($1,$2,$3,$4)",
-          [randomUUID(), threadId, "user", userText]
-      );
-    }
-
-    // build transcript for context (client-provided)
+    // Build transcript for multi-turn context
     const transcript = messages
         .map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`)
         .join("\n");
 
-    // call OpenAI
     const response = await client.responses.create({
       model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
       input:
@@ -136,29 +61,42 @@ app.post("/api/chat", async (req, res) => {
           transcript +
           `\nAssistant:`,
     });
+    // List threads (optional)
+    app.get("/api/chat/threads", async (req, res) => {
+      const { rows } = await pool.query(
+          "SELECT id, created_at FROM chat_threads ORDER BY created_at DESC LIMIT 50"
+      );
+      res.json({ threads: rows });
+    });
 
+// Get messages of one thread (optional)
+    app.get("/api/chat/threads/:id/messages", async (req, res) => {
+      const { id } = req.params;
+      const { rows } = await pool.query(
+          "SELECT role, content, created_at FROM chat_messages WHERE thread_id=$1 ORDER BY created_at ASC",
+          [id]
+      );
+      res.json({ messages: rows });
+    });
     const replyText = response.output?.[0]?.content?.[0]?.text ?? "";
 
-    // save assistant message
-    await pool.query(
-        "INSERT INTO chat_messages (id, thread_id, role, content) VALUES ($1,$2,$3,$4)",
-        [randomUUID(), threadId, "assistant", replyText || "(empty)"]
-    );
-
-    res.json({ threadId, reply: replyText || "(empty)" });
+    res.json({ reply: replyText || "(empty)" });
   } catch (err) {
-    const msg =
-        err?.message ||
-        err?.detail ||
-        err?.stack ||
-        String(err);
-
-    console.error("API /api/chat ERROR:", err);
-
-    res.status(500).json({ reply: null, error: msg });
+    console.error("Error from /api/chat:", err);
+    res.status(500).json({ reply: null, error: err?.message ?? String(err) });
   }
 });
 
 app.listen(port, () => {
   console.log(`Server listening on port ${port}`);
+});
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : undefined,
+});
+
+app.get("/api/db/ping", async (req, res) => {
+  const r = await pool.query("SELECT NOW() as now");
+  res.json(r.rows[0]);
 });
