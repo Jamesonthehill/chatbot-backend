@@ -2,24 +2,10 @@ import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
 import pg from "pg";
-import crypto from "crypto";
 
 const app = express();
 const port = process.env.PORT || 3000;
 const { Pool } = pg;
-
-// Fail fast if DATABASE_URL is missing
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL missing");
-}
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : undefined,
-});
-
-console.log("DB host:", new URL(process.env.DATABASE_URL).hostname);
-
 // ✅ CORS: allow your website origins (add/remove as needed)
 const ALLOWED_ORIGINS = [
   "https://jamesonthehill.com",
@@ -35,7 +21,7 @@ app.use(
         if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
         return cb(new Error("CORS blocked: " + origin), false);
       },
-      methods: ["GET", "POST", "OPTIONS"],
+      methods: ["POST", "OPTIONS"],
       allowedHeaders: ["Content-Type"],
     })
 );
@@ -50,105 +36,51 @@ const client = new OpenAI({
 // (optional) health check
 app.get("/", (req, res) => res.send("OK"));
 
-// DB ping endpoint
-app.get("/api/db/ping", async (req, res) => {
-  try {
-    const { rows } = await pool.query("SELECT NOW()");
-    res.json({ timestamp: rows[0].now });
-  } catch (err) {
-    console.error("DB ping error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// List threads
-app.get("/api/chat/threads", async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-        "SELECT id, created_at FROM chat_threads ORDER BY created_at DESC LIMIT 50"
-    );
-    res.json({ threads: rows });
-  } catch (err) {
-    console.error("Error fetching threads:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get messages of one thread
-app.get("/api/chat/threads/:id/messages", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { rows } = await pool.query(
-        "SELECT role, content, created_at FROM chat_messages WHERE thread_id=$1 ORDER BY created_at ASC",
-        [id]
-    );
-    res.json({ messages: rows });
-  } catch (err) {
-    console.error("Error fetching messages:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.post("/api/chat", async (req, res) => {
   try {
-    let { threadId, messages } = req.body;
+    // ✅ Support BOTH payload styles:
+    // 1) { message: "hi" }              (your old index.html)
+    // 2) { messages: [{role,content}] } (your React widget)
+    let messages = Array.isArray(req.body.messages) ? req.body.messages : [];
+    const single = typeof req.body.message === "string" ? req.body.message : "";
 
-    // Support old payload style
-    if (!messages && req.body.message) {
-      messages = [{ role: "user", content: req.body.message }];
+    // If only {message} was provided, convert to messages format
+    if (messages.length === 0 && single.trim()) {
+      messages = [{ role: "user", content: single.trim() }];
     }
 
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: "Messages required" });
-    }
+    // Build transcript for multi-turn context
+    const transcript = messages
+        .map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`)
+        .join("\n");
 
-    // Generate threadId if not provided
-    if (!threadId) {
-      threadId = crypto.randomUUID();
-    }
-
-    // Check if thread exists
-    const threadExists = await pool.query("SELECT id FROM chat_threads WHERE id = $1", [threadId]);
-    if (threadExists.rows.length === 0) {
-      // Insert new thread
-      await pool.query("INSERT INTO chat_threads (id) VALUES ($1)", [threadId]);
-      // Insert all messages for new thread
-      for (const msg of messages) {
-        await pool.query(
-          "INSERT INTO chat_messages (id, thread_id, role, content) VALUES ($1, $2, $3, $4)",
-          [crypto.randomUUID(), threadId, msg.role, msg.content]
-        );
-      }
-    } else {
-      // For existing thread, assume messages include the new user message at the end
-      // Insert only the last user message if it's new
-      const lastMsg = messages[messages.length - 1];
-      if (lastMsg.role === "user") {
-        await pool.query(
-          "INSERT INTO chat_messages (id, thread_id, role, content) VALUES ($1, $2, $3, $4)",
-          [crypto.randomUUID(), threadId, lastMsg.role, lastMsg.content]
-        );
-      }
-    }
-
-
-    const response = await client.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "You are a helpful chatbot for my website. Answer clearly." },
-        ...messages
-      ],
+    const response = await client.responses.create({
+      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+      input:
+          `You are a helpful chatbot for my website. Answer clearly.\n\n` +
+          transcript +
+          `\nAssistant:`,
+    });
+    // List threads (optional)
+    app.get("/api/chat/threads", async (req, res) => {
+      const { rows } = await pool.query(
+          "SELECT id, created_at FROM chat_threads ORDER BY created_at DESC LIMIT 50"
+      );
+      res.json({ threads: rows });
     });
 
-    const replyText = response.choices[0]?.message?.content ?? "";
+// Get messages of one thread (optional)
+    app.get("/api/chat/threads/:id/messages", async (req, res) => {
+      const { id } = req.params;
+      const { rows } = await pool.query(
+          "SELECT role, content, created_at FROM chat_messages WHERE thread_id=$1 ORDER BY created_at ASC",
+          [id]
+      );
+      res.json({ messages: rows });
+    });
+    const replyText = response.output?.[0]?.content?.[0]?.text ?? "";
 
-    // Insert assistant message
-    await pool.query(
-      "INSERT INTO chat_messages (id, thread_id, role, content) VALUES ($1, $2, $3, $4)",
-      [crypto.randomUUID(), threadId, "assistant", replyText]
-    );
-
-    res.json({ reply: replyText, threadId });
+    res.json({ reply: replyText || "(empty)" });
   } catch (err) {
     console.error("Error from /api/chat:", err);
     res.status(500).json({ reply: null, error: err?.message ?? String(err) });
@@ -157,4 +89,9 @@ app.post("/api/chat", async (req, res) => {
 
 app.listen(port, () => {
   console.log(`Server listening on port ${port}`);
+});
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : undefined,
 });
