@@ -46,6 +46,7 @@ const client = new OpenAI({
 
 app.get("/", (req, res) => res.send("OK"));
 
+console.log("Before inserting user message");
 app.get("/api/db/ping", async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT NOW() as now");
@@ -56,6 +57,7 @@ app.get("/api/db/ping", async (req, res) => {
   }
 });
 
+console.log("Before loading history");
 app.get("/api/chat/threads", async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -67,7 +69,7 @@ app.get("/api/chat/threads", async (req, res) => {
     res.status(500).json({ error: err?.message ?? String(err) });
   }
 });
-
+console.log("Before inserting assistant message");
 app.get("/api/chat/threads/:id/messages", async (req, res) => {
   try {
     const { id } = req.params;
@@ -81,7 +83,7 @@ app.get("/api/chat/threads/:id/messages", async (req, res) => {
     res.status(500).json({ error: err?.message ?? String(err) });
   }
 });
-
+console.log("Before calling OpenAI");
 app.post("/api/chat", async (req, res) => {
   try {
     const incomingThreadId = req.body.threadId;
@@ -127,7 +129,7 @@ app.post("/api/chat", async (req, res) => {
     });
 
     const replyText = response.output_text || "(empty)";
-
+    console.log("Before inserting thread");
     await pool.query(
         "INSERT INTO chat_messages (id, thread_id, role, content) VALUES ($1, $2, $3, $4)",
         [randomUUID(), threadId, "assistant", replyText]
