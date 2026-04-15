@@ -65,6 +65,32 @@ app.get("/api/db/ping", async (req, res) => {
   }
 });
 
+app.get("/api/debug/db-host", (req, res) => {
+  try {
+    const url = process.env.DATABASE_URL;
+
+    if (!url) {
+      return res.json({
+        hasDatabaseUrl: false,
+      });
+    }
+
+    const parsed = new URL(url);
+
+    res.json({
+      hasDatabaseUrl: true,
+      protocol: parsed.protocol,
+      hostname: parsed.hostname,
+      port: parsed.port || "5432",
+      pathname: parsed.pathname,
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: err?.stack || err?.message || String(err),
+    });
+  }
+});
+
 console.log("Before loading history");
 app.get("/api/chat/threads", async (req, res) => {
   try {
