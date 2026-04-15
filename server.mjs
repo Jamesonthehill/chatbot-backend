@@ -95,3 +95,8 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : undefined,
 });
+
+app.get("/api/db/ping", async (req, res) => {
+  const r = await pool.query("SELECT NOW() as now");
+  res.json(r.rows[0]);
+});
