@@ -1,10 +1,11 @@
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
+import pg from "pg";
 
 const app = express();
 const port = process.env.PORT || 3000;
-
+const { Pool } = pg;
 // ✅ CORS: allow your website origins (add/remove as needed)
 const ALLOWED_ORIGINS = [
   "https://jamesonthehill.com",
@@ -88,4 +89,9 @@ app.post("/api/chat", async (req, res) => {
 
 app.listen(port, () => {
   console.log(`Server listening on port ${port}`);
+});
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : undefined,
 });
