@@ -95,3 +95,15 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : undefined,
 });
+
+app.get("/api/debug/env", (req, res) => {
+  const url = process.env.DATABASE_URL || "";
+
+  res.json({
+    hasDatabaseUrl: !!url,
+    startsWith: url ? url.slice(0, 30) : null,
+    includesLocalhost: url.includes("localhost"),
+    includes127001: url.includes("127.0.0.1"),
+    includesRenderHost: url.includes("render.com"),
+  });
+});
