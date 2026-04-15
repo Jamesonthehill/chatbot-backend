@@ -46,12 +46,12 @@ const client = new OpenAI({
    Postgres (Render)
    Set DATABASE_URL in Render env
 -------------------------------- */
+const dbUrl = process.env.DATABASE_URL;
+if (!dbUrl) throw new Error("DATABASE_URL missing");
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes("render.com")
-      ? { rejectUnauthorized: false }
-      : undefined,
-  application_name: "chatbot-backend",
+  connectionString: dbUrl,
+  ssl: dbUrl.includes(".render.com") ? { rejectUnauthorized: false } : undefined,
 });
 
 /* -------------------------------
