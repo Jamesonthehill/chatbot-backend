@@ -52,8 +52,16 @@ app.get("/api/db/ping", async (req, res) => {
     const { rows } = await pool.query("SELECT NOW() as now");
     res.json(rows[0]);
   } catch (err) {
-    console.error("DB ping error:", err);
-    res.status(500).json({ error: err?.message ?? String(err) });
+    console.error("DB ping FULL ERROR:", err);
+
+    res.status(500).json({
+      error:
+          err?.stack ||
+          err?.message ||
+          err?.detail ||
+          String(err) ||
+          "Unknown DB error",
+    });
   }
 });
 
