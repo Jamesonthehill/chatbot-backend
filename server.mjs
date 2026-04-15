@@ -25,7 +25,7 @@ app.use(
     })
 );
 
-app.options("/*", cors()); // ✅ handle preflight
+app.options(/.*/, cors()); // ✅ handle preflight
 app.use(express.json());
 
 const client = new OpenAI({
