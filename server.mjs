@@ -89,7 +89,7 @@ app.post("/api/chat", async (req, res) => {
     const single = typeof req.body.message === "string" ? req.body.message : "";
 
     if (messages.length === 0 && single.trim()) {
-      messages = [{ role: "user", content: single.trim() }];
+      messages = [{role: "user", content: single.trim()}];
     }
 
     const threadId = incomingThreadId || randomUUID();
@@ -109,7 +109,7 @@ app.post("/api/chat", async (req, res) => {
       );
     }
 
-    const { rows: historyRows } = await pool.query(
+    const {rows: historyRows} = await pool.query(
         "SELECT role, content FROM chat_messages WHERE thread_id = $1 ORDER BY created_at ASC",
         [threadId]
     );
@@ -133,13 +133,24 @@ app.post("/api/chat", async (req, res) => {
         [randomUUID(), threadId, "assistant", replyText]
     );
 
-    res.json({ threadId, reply: replyText });
+    res.json({threadId, reply: replyText});
   } catch (err) {
-    console.error("Error from /api/chat:", err);
-    res.status(500).json({ reply: null, error: err?.message ?? String(err) });
+    console.error("Error from /api/chat FULL:", err);
+
+    const errorMessage =
+        err?.stack ||
+        err?.message ||
+        err?.detail ||
+        JSON.stringify(err, null, 2) ||
+        String(err);
+
+    res.status(500).json({
+      reply: null,
+      error: errorMessage,
+    });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
+  console.log(`Server running on port ${port}`);
 });
