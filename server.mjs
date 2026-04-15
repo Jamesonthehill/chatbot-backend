@@ -8,6 +8,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 const { Pool } = pg;
 
+
 /* -------------------------------
    CORS (allow your website)
 -------------------------------- */
@@ -47,9 +48,9 @@ const client = new OpenAI({
 -------------------------------- */
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // Render Postgres typically needs SSL
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : undefined,
-  // optional: helps you see it in pg_stat_activity
+  ssl: process.env.DATABASE_URL?.includes("render.com")
+      ? { rejectUnauthorized: false }
+      : undefined,
   application_name: "chatbot-backend",
 });
 
