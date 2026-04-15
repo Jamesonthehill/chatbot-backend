@@ -146,8 +146,15 @@ app.post("/api/chat", async (req, res) => {
 
     res.json({ threadId, reply: replyText || "(empty)" });
   } catch (err) {
-    console.error("Error from /api/chat:", err);
-    res.status(500).json({ reply: null, error: err?.message ?? String(err) });
+    const msg =
+        err?.message ||
+        err?.detail ||
+        err?.stack ||
+        String(err);
+
+    console.error("API /api/chat ERROR:", err);
+
+    res.status(500).json({ reply: null, error: msg });
   }
 });
 
