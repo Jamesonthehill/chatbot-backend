@@ -11,6 +11,23 @@ const app = express();
 const port = process.env.PORT || 3000;
 const { Pool } = pg;
 
+const embeddingResponse = await client.embeddings.create({
+  model: "text-embedding-3-small",
+  input: userText,
+});
+
+const queryEmbedding = embeddingResponse.data[0].embedding;
+
+const { rows: contextRows } = await pool.query(
+    `SELECT title, source, content, similarity
+   FROM match_personal_knowledge($1::vector, $2)`,
+    [JSON.stringify(queryEmbedding), 5]
+);
+
+const context = contextRows
+    .map((row, i) => `Source ${i + 1}: ${row.title}\n${row.content}`)
+    .join("\n\n");
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
