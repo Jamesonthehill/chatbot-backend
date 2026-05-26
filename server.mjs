@@ -13,9 +13,7 @@ const { Pool } = pg;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes("render.com")
-      ? { rejectUnauthorized: false }
-      : undefined,
+  ssl: { rejectUnauthorized: false },
 });
 
 const ALLOWED_ORIGINS = [
