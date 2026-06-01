@@ -154,10 +154,27 @@ app.post("/api/chat", async (req, res) => {
 
     const response = await client.responses.create({
       model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+      instructions: `
+    You are Geonwoo Lee's resume assistant.
+    
+    You answer questions for employers, recruiters, and portfolio visitors.
+    Use only Geonwoo's resume as your source of truth.
+    If the resume does not mention the answer, say:
+    "Geonwoo's resume does not mention that."
+    
+    Do not invent experience, skills, dates, companies, or projects.
+    Keep answers professional and concise.
+      `,
       input:
-          `You are a helpful chatbot for my website. Answer clearly.\n\n` +
-          transcript +
-          `\nAssistant:`,
+          `Conversation so far:\n${transcript}\n\n` +
+          `Current question:\n${userText}`,
+      tools: [
+        {
+          type: "file_search",
+          vector_store_ids: [process.env.RESUME_VECTOR_STORE_ID],
+          max_num_results: 8,
+        },
+      ],
     });
 
     const replyText = response.output_text || "(empty)";
