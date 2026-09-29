@@ -42,6 +42,34 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+let scheduleTablePromise;
+
+function ensureScheduleTable() {
+  if (!scheduleTablePromise) {
+    scheduleTablePromise = pool.query(`
+      CREATE TABLE IF NOT EXISTS portfolio_schedules (
+        owner_id UUID PRIMARY KEY,
+        state JSONB NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+  }
+  return scheduleTablePromise;
+}
+
+function validScheduleState(value) {
+  return Boolean(
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Array.isArray(value.tasks) &&
+      value.tasks.length <= 500 &&
+      value.situation &&
+      typeof value.situation === "object"
+  );
+}
+
 app.get("/", (req, res) => res.send("OK"));
 
 console.log("Before inserting user message");
@@ -86,6 +114,52 @@ app.get("/api/debug/db-host", (req, res) => {
     res.status(500).json({
       error: err?.stack || err?.message || String(err),
     });
+  }
+});
+
+app.get("/api/schedule/:ownerId", async (req, res) => {
+  try {
+    const { ownerId } = req.params;
+    if (!UUID_PATTERN.test(ownerId)) {
+      return res.status(400).json({ error: "Invalid schedule ID" });
+    }
+
+    await ensureScheduleTable();
+    const { rows } = await pool.query(
+        "SELECT state, updated_at FROM portfolio_schedules WHERE owner_id = $1",
+        [ownerId]
+    );
+    res.json(rows[0] || { state: null, updated_at: null });
+  } catch (err) {
+    console.error("Schedule load error:", err);
+    res.status(500).json({ error: "Unable to load schedule" });
+  }
+});
+
+app.post("/api/schedule/:ownerId", async (req, res) => {
+  try {
+    const { ownerId } = req.params;
+    const { state } = req.body || {};
+    if (!UUID_PATTERN.test(ownerId)) {
+      return res.status(400).json({ error: "Invalid schedule ID" });
+    }
+    if (!validScheduleState(state)) {
+      return res.status(400).json({ error: "Invalid schedule data" });
+    }
+
+    await ensureScheduleTable();
+    const { rows } = await pool.query(
+        `INSERT INTO portfolio_schedules (owner_id, state, updated_at)
+         VALUES ($1, $2::jsonb, NOW())
+         ON CONFLICT (owner_id)
+         DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()
+         RETURNING updated_at`,
+        [ownerId, JSON.stringify(state)]
+    );
+    res.json({ saved: true, updated_at: rows[0].updated_at });
+  } catch (err) {
+    console.error("Schedule save error:", err);
+    res.status(500).json({ error: "Unable to save schedule" });
   }
 });
 
