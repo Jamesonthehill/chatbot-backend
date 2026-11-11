@@ -63,27 +63,29 @@ test("summary completes only at the last ready step", async () => {
   assert.equal(done.socratic.phase, "completed");
 });
 
-test("Javis is the default, answers directly, and preserves the question when switching", async () => {
-  const client = mockClient();
-  const initial = await guidedTurn(client, { action: "start" });
-  assert.equal(initial.tutor_mode, "javis");
-  assert.match(initial.messages[0].lead_in, /Javis/);
-  assert.equal(initial.messages[0].next_thinking_step, "");
-  const original = initial.socratic.next_thinking_step;
-  client.outputs.push({ subtopic_request: true, retrieval_query: "What is code review?" },
-    { lead_in: "Code review is a teammate checking your change before it is merged.", next_question: "Unexpected quiz?", lead_emphasis: "checking your change", question_emphasis: "", ready: true });
-  const reply = await guidedTurn(client, { message: "What is code review?", history: initial.messages, engine_state: initial.socratic });
-  assert.equal(reply.messages.at(-1).next_thinking_step, "");
-  assert.equal(reply.socratic.learning_detour, undefined);
-  assert.equal(reply.socratic.next_thinking_step, original);
-  assert.match(client.requests.at(-1).messages[0].content, /Answer the student's latest question directly/);
-  const switched = await guidedTurn({}, { action: "set_mode", tutor_mode: "socrates", history: reply.messages, engine_state: reply.socratic });
-  assert.equal(switched.messages.length, reply.messages.length + 1);
-  assert.equal(switched.messages.at(-1).next_thinking_step, original);
-  assert.equal(switched.tutor_mode, "socrates");
-  assert.equal(switched.messages[1].content, reply.messages[1].content);
-  const back = await guidedTurn({}, { action: "set_mode", tutor_mode: "javis", history: switched.messages, engine_state: switched.socratic });
-  assert.equal(back.socratic.next_thinking_step, original);
-  assert.equal(back.socratic.learning_step_index, 0);
+test("Javis and Socrates share questions and progression while only tone differs", async () => {
+  for (const mode of ["javis", "socrates"]) {
+    const client = mockClient();
+    const initial = await guidedTurn(client, { action: "start", ...(mode === "socrates" ? {tutor_mode:mode} : {}) });
+    assert.equal(initial.tutor_mode, mode);
+    assert.ok(initial.messages[0].next_thinking_step.endsWith("?"));
+    const original = initial.socratic.next_thinking_step;
+    client.outputs.push({ subtopic_request: true, retrieval_query: "What is code review?" },
+      { lead_in: "A teammate checks your change before it is merged.", next_question: "Does that help?", lead_emphasis: "checks your change", question_emphasis: "Does that help?", ready: true });
+    const reply = await guidedTurn(client, { message: "What is code review?", history: initial.messages, engine_state: initial.socratic });
+    assert.equal(reply.messages.at(-1).next_thinking_step, "**Does that help?**");
+    assert.equal(reply.socratic.learning_detour.question, original);
+    assert.equal(reply.socratic.step_readiness.ready, false);
+    assert.match(client.requests.at(-1).messages[0].content, mode === "javis" ? /helpful friend/ : /formal, supportive/);
+    assert.match(client.requests.at(-1).messages[0].content, /same Socratic learning process/);
+    const switched = await guidedTurn({}, { action: "set_mode", tutor_mode: mode === "javis" ? "socrates" : "javis", history: reply.messages, engine_state: reply.socratic });
+    assert.deepEqual(switched.messages, reply.messages);
+    assert.equal(switched.socratic.learning_detour.question, original);
+    const resumed = await guidedTurn({}, { action: "resume", history: switched.messages, engine_state: switched.socratic });
+    assert.equal(resumed.socratic.next_thinking_step, original);
+    const next = await guidedTurn({}, { action: "continue", history: resumed.messages, engine_state: {...resumed.socratic,step_readiness:{ready:true}} });
+    assert.equal(next.socratic.learning_step_index, 1);
+    assert.equal(next.tutor_mode, switched.tutor_mode);
+  }
   await assert.rejects(guidedTurn({}, { action: "start", tutor_mode: "invalid" }), /Choose Javis/);
 });
