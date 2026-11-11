@@ -1,0 +1,23 @@
+{
+  "MATERIAL": "Code review practice guide\nA pull request proposes a change for teammates to inspect before merging.\nReviewers check correctness, clarity, tests, and edge cases, including empty input.\nA review comment should identify a concrete problem, explain its impact, and suggest a useful direction.\nThe author should ask for clarification when needed and respond to the substance of feedback.\nBefore merging, fix identified problems and add tests that cover the reported failure.\nA passing test supports the tested behavior. It does not prove that every possible input is correct.\n",
+  "STEPS": [
+    {
+      "title": "Understand the feedback",
+      "goal": "Explain why a reported edge case matters.",
+      "scenario": "You opened a pull request for a function that processes a list of student names. A teammate reports that it crashes when the list is empty.",
+      "question": "Why should you address the empty-list case even if the function works with a populated list?"
+    },
+    {
+      "title": "Respond constructively",
+      "goal": "Write a constructive response to a concrete review comment.",
+      "scenario": "The reviewer says, \u201cThis crashes on an empty list. Could we handle that case and add a test?\u201d You want to keep the review useful and respectful.",
+      "question": "How would you respond to the reviewer, and what would you do next?"
+    },
+    {
+      "title": "Check the fix",
+      "goal": "Explain how an additional test supports the fix and its limits.",
+      "scenario": "You fixed the empty-list crash and added a passing empty-list test. The existing tests still pass.",
+      "question": "What does the new test tell your team, and what should you still consider before merging?"
+    }
+  ]
+}
