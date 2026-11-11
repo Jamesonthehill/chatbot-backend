@@ -60,6 +60,10 @@ async function retrieve(client, query) {
     text, score: vector.reduce((sum, value, j) => sum + value * embeddings[i][j], 0),
   })).sort((a, b) => b.score - a.score).slice(0, 2).map(item => item.text).join("\n\n");
 }
+function tutorMessage(lead, question = "") {
+  return { role: "assistant", content: [lead, question].filter(Boolean).join("\n\n"),
+    lead_in: lead, next_thinking_step: question };
+}
 function result(messages, state, id) {
   return { messages, socratic: state, conversation_id: id,
     steps: STEPS.map(({ title, goal }) => ({ title, goal })), material: MATERIAL };
@@ -77,13 +81,15 @@ export async function guidedTurn(client, body = {}) {
     if (!["user", "assistant"].includes(item.role) || typeof item.content !== "string" || item.content.length > 10000) {
       throw Object.assign(new Error("Invalid conversation history."), { status: 422 });
     }
-    return { role: item.role, content: item.content };
+    return { role: item.role, content: item.content,
+      ...(item.role === "assistant" && typeof item.lead_in === "string" && typeof item.next_thinking_step === "string"
+        ? { lead_in: item.lead_in, next_thinking_step: item.next_thinking_step } : {}) };
   });
   const state = { ...engine_state };
   let index = Math.min(Math.max(Number(state.learning_step_index) || 0, 0), STEPS.length - 1);
   const step = STEPS[index];
   if (action === "start") {
-    return result([{ role: "assistant", content: "Step 1: " + STEPS[0].title + "\n\n" + STEPS[0].scenario + "\n\n" + STEPS[0].question }],
+    return result([tutorMessage("Step 1: " + STEPS[0].title + "\n\n" + STEPS[0].scenario, STEPS[0].question)],
       { phase: "teaching", learning_step_index: 0, next_thinking_step: STEPS[0].question }, conversation_id);
   }
   if (!messages.length) throw Object.assign(new Error("Start the demo first."), { status: 409 });
@@ -92,8 +98,8 @@ export async function guidedTurn(client, body = {}) {
     if (!detour?.question) throw Object.assign(new Error("There is no paused question."), { status: 409 });
     delete state.learning_detour;
     state.next_thinking_step = detour.question;
-    messages.push({ role: "assistant", content: "Okay, let’s apply what you just learned.\n\n" +
-      (detour.scenario || step.scenario) + "\n\n**" + detour.question + "**" });
+    messages.push(tutorMessage("Okay, let’s apply what you just learned.\n\n" +
+      (detour.scenario || step.scenario), detour.question));
     return result(messages, state, conversation_id);
   }
   if (action === "continue") {
@@ -103,7 +109,7 @@ export async function guidedTurn(client, body = {}) {
     index += 1;
     const next = STEPS[index];
     const nextState = { phase: "teaching", learning_step_index: index, next_thinking_step: next.question };
-    messages.push({ role: "assistant", content: "Step " + (index + 1) + ": " + next.title + "\n\n" + next.scenario + "\n\n" + next.question });
+    messages.push(tutorMessage("Step " + (index + 1) + ": " + next.title + "\n\n" + next.scenario, next.question));
     return result(messages, nextState, conversation_id);
   }
   if (!message.trim()) throw Object.assign(new Error("Enter a message."), { status: 422 });
@@ -124,7 +130,8 @@ export async function guidedTurn(client, body = {}) {
       "Respond to what the student actually said. Explain unfamiliar terms directly. Use a short example " +
       "when it helps and ask at most one useful question. After a help explanation, ask a brief natural " +
       "confirmation. Assess answer attempts accurately and explain specific mistakes. Use two or three " +
-      "short sentences for ordinary turns. Put feedback in lead_in and the question in next_question. " +
+      "short sentences for ordinary turns. Put all explanation and feedback in lead_in, with no questions. " +
+      "Put only the single learner question in next_question. Keep statements out of next_question. " +
       "Copy the reason clause from lead_in into lead_emphasis and the core question into question_emphasis. " +
       "When a detour is active, explain the subtopic with a separate, clearly hypothetical example. " +
       "Stay in the detour until the visitor clicks the return button. " +
@@ -141,10 +148,10 @@ export async function guidedTurn(client, body = {}) {
   state.step_readiness = { ready };
   state.next_thinking_step = ready || action === "finish" ? "" : turn.next_question;
   if (action === "finish") state.phase = "completed";
-  const answer = [emphasize(turn.lead_in, turn.lead_emphasis),
-    emphasize(state.next_thinking_step, turn.question_emphasis)].filter(Boolean).join("\n\n");
-  if (!answer) throw new Error("The tutor returned an empty reply.");
-  messages.push({ role: "user", content: message }, { role: "assistant", content: answer });
+  const answer = tutorMessage(emphasize(turn.lead_in, turn.lead_emphasis),
+    emphasize(state.next_thinking_step, turn.question_emphasis));
+  if (!answer.content) throw new Error("The tutor returned an empty reply.");
+  messages.push({ role: "user", content: message }, answer);
   return result(messages, state, conversation_id);
 }
 

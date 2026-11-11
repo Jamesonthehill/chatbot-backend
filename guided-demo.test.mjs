@@ -21,6 +21,8 @@ test("guided activity starts with material and three steps", async () => {
   assert.equal(result.steps.length, 3);
   assert.match(result.messages[0].content, /empty-list/);
   assert.match(result.material, /Code review practice guide/);
+  assert.match(result.messages[0].lead_in, /teammate reports/);
+  assert.equal(result.messages[0].next_thinking_step, result.socratic.next_thinking_step);
 });
 
 test("a subtopic preserves the exact paused question and scenario", async () => {
