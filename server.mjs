@@ -38,7 +38,8 @@ app.use(
 );
 
 app.options(/.*/, cors());
-app.use(express.json());
+app.set("trust proxy", 1);
+app.use(express.json({ limit: "150kb" }));
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
