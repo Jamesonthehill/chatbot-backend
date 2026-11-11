@@ -165,6 +165,7 @@ export async function guidedTurn(client, body = {}) {
   const answer = tutorMessage(emphasize(turn.lead_in, turn.lead_emphasis),
     emphasize(state.next_thinking_step, turn.question_emphasis));
   if (!answer.content) throw new Error("The tutor returned an empty reply.");
+  answer.sources = [evidence];
   messages.push({ role: "user", content: message }, answer);
   return respond(messages, state, conversation_id);
 }

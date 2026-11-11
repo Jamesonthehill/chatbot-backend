@@ -34,6 +34,7 @@ test("a subtopic preserves the exact paused question and scenario", async () => 
       lead_emphasis: "unusual input", question_emphasis: "What happens when the list is empty?", ready: true });
   const detour = await guidedTurn(client, { message: "What is an edge case?", history: initial.messages, engine_state: initial.socratic });
   assert.equal(detour.socratic.learning_detour.question, original);
+  assert.ok(detour.messages.at(-1).sources[0].length > 0);
   assert.equal(detour.socratic.step_readiness.ready, false);
   const resumed = await guidedTurn(client, { action: "resume", history: detour.messages, engine_state: detour.socratic });
   assert.equal(resumed.socratic.next_thinking_step, original);
