@@ -67,7 +67,7 @@ function result(messages, state, id, document) {
   const { MATERIAL, STEPS } = document;
   return { messages, socratic: state, conversation_id: id,
     document_token: document.token || null, document_title: document.title || "Code review practice guide",
-    tutor_mode: state.tutor_mode || "javis",
+    tutor_mode: state.tutor_mode || "jarvis",
     steps: STEPS.map(({ title, goal }) => ({ title, goal })), material: MATERIAL };
 }
 
@@ -75,8 +75,9 @@ export async function guidedTurn(client, body = {}) {
   const uploaded = readDocument(body.document_token);
   const document = uploaded ? { ...uploaded, token: body.document_token } : { MATERIAL, STEPS };
   const steps = document.STEPS;
-  const mode = body.tutor_mode ?? body.engine_state?.tutor_mode ?? "javis";
-  if (!["javis", "socrates"].includes(mode)) throw Object.assign(new Error("Choose Javis or Socrates mode."), { status: 422 });
+  const requestedMode = body.tutor_mode ?? body.engine_state?.tutor_mode ?? "jarvis";
+  const mode = requestedMode === "javis" ? "jarvis" : requestedMode;
+  if (!["jarvis", "socrates"].includes(mode)) throw Object.assign(new Error("Choose Jarvis or Socrates mode."), { status: 422 });
   const respond = (messages, state, id) => result(messages, state, id, document);
   const { action = "message", message = "", history = [], engine_state = {}, conversation_id = crypto.randomUUID() } = body;
   if (!["start", "message", "continue", "resume", "finish", "set_mode"].includes(action)) {
@@ -89,8 +90,9 @@ export async function guidedTurn(client, body = {}) {
     if (!["user", "assistant"].includes(item.role) || typeof item.content !== "string" || item.content.length > 10000) {
       throw Object.assign(new Error("Invalid conversation history."), { status: 422 });
     }
+    if (item.tutor_mode === "javis") item = { ...item, tutor_mode: "jarvis" };
     return { role: item.role, content: item.content,
-      ...(["javis", "socrates"].includes(item.tutor_mode) ? { tutor_mode: item.tutor_mode } : {}),
+      ...(["jarvis", "socrates"].includes(item.tutor_mode) ? { tutor_mode: item.tutor_mode } : {}),
       ...(Array.isArray(item.sources) ? { sources: item.sources.filter(source => typeof source === "string").slice(0,2).map(source => source.slice(0,2500)) } : {}),
       ...(item.role === "assistant" && typeof item.lead_in === "string" && typeof item.next_thinking_step === "string"
         ? { lead_in: item.lead_in, next_thinking_step: item.next_thinking_step } : {}) };
@@ -150,8 +152,8 @@ export async function guidedTurn(client, body = {}) {
   const evidence = await retrieve(client, observation.retrieval_query || message, document.MATERIAL);
   const turn = await structured(client, "guided_tutor_turn", turnSchema, [
     { role: "system", content:
-      (mode === "javis"
-        ? "You are Javis, a friendly, casual Socratic tutor. Speak like a helpful friend, using contractions, everyday wording, and occasional light slang when natural. Stay clear and respectful. "
+      (mode === "jarvis"
+        ? "You are Jarvis, a friendly, casual Socratic tutor. Speak like a helpful friend, using contractions, everyday wording, and occasional light slang when natural. Stay clear and respectful. "
         : "You are Socrates, a formal, supportive Socratic tutor. Use professional, precise wording without slang. ") +
       "Both voices follow the same Socratic learning process. Ground course claims in the supplied practice guide. " +
       "Respond to what the student actually said. Explain unfamiliar terms directly. Use a short example " +

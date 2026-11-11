@@ -63,8 +63,8 @@ test("summary completes only at the last ready step", async () => {
   assert.equal(done.socratic.phase, "completed");
 });
 
-test("Javis and Socrates share questions and progression while only tone differs", async () => {
-  for (const mode of ["javis", "socrates"]) {
+test("Jarvis and Socrates share questions and progression while only tone differs", async () => {
+  for (const mode of ["jarvis", "socrates"]) {
     const client = mockClient();
     const initial = await guidedTurn(client, { action: "start", ...(mode === "socrates" ? {tutor_mode:mode} : {}) });
     assert.equal(initial.tutor_mode, mode);
@@ -76,9 +76,9 @@ test("Javis and Socrates share questions and progression while only tone differs
     assert.equal(reply.messages.at(-1).next_thinking_step, "**Does that help?**");
     assert.equal(reply.socratic.learning_detour.question, original);
     assert.equal(reply.socratic.step_readiness.ready, false);
-    assert.match(client.requests.at(-1).messages[0].content, mode === "javis" ? /helpful friend/ : /formal, supportive/);
+    assert.match(client.requests.at(-1).messages[0].content, mode === "jarvis" ? /helpful friend/ : /formal, supportive/);
     assert.match(client.requests.at(-1).messages[0].content, /same Socratic learning process/);
-    const switched = await guidedTurn({}, { action: "set_mode", tutor_mode: mode === "javis" ? "socrates" : "javis", history: reply.messages, engine_state: reply.socratic });
+    const switched = await guidedTurn({}, { action: "set_mode", tutor_mode: mode === "jarvis" ? "socrates" : "jarvis", history: reply.messages, engine_state: reply.socratic });
     assert.deepEqual(switched.messages, reply.messages);
     assert.equal(switched.socratic.learning_detour.question, original);
     const resumed = await guidedTurn({}, { action: "resume", history: switched.messages, engine_state: switched.socratic });
@@ -87,5 +87,14 @@ test("Javis and Socrates share questions and progression while only tone differs
     assert.equal(next.socratic.learning_step_index, 1);
     assert.equal(next.tutor_mode, switched.tutor_mode);
   }
-  await assert.rejects(guidedTurn({}, { action: "start", tutor_mode: "invalid" }), /Choose Javis/);
+  await assert.rejects(guidedTurn({}, { action: "start", tutor_mode: "invalid" }), /Choose Jarvis/);
+});
+
+test("older Javis sessions are accepted under the corrected Jarvis name", async () => {
+  const old = await guidedTurn({}, { action: "start", tutor_mode: "javis" });
+  assert.equal(old.tutor_mode, "jarvis");
+  const reply = await guidedTurn({}, { action:"set_mode", tutor_mode:"jarvis", history:old.messages.map(message=>({...message,tutor_mode:"javis"})), engine_state:{...old.socratic,tutor_mode:"javis"} });
+  assert.equal(reply.messages[0].tutor_mode,"jarvis");
+  assert.equal(reply.messages[0].content,old.messages[0].content);
+  assert.equal(reply.socratic.next_thinking_step,old.socratic.next_thinking_step);
 });
