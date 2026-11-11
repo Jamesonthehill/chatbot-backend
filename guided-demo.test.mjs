@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { guidedTurn } from "./guided-demo.mjs";
+import { guidedTurn as runGuidedTurn } from "./guided-demo.mjs";
+import { signDocument } from "./guided-documents.mjs";
+import { readFileSync } from "node:fs";
+process.env.OPENAI_API_KEY ||= "test-only-document-signing-key";
+const fixture = JSON.parse(readFileSync(new URL("./tests/fixtures/learning-material.json", import.meta.url)));
+const documentToken = signDocument({...fixture,title:"Uploaded test document"});
+const guidedTurn = (client, body={}) => runGuidedTurn(client, {document_token:documentToken,...body});
 
 function mockClient() {
   const outputs = [];
@@ -97,4 +103,10 @@ test("older Javis sessions are accepted under the corrected Jarvis name", async 
   assert.equal(reply.messages[0].tutor_mode,"jarvis");
   assert.equal(reply.messages[0].content,old.messages[0].content);
   assert.equal(reply.socratic.next_thinking_step,old.socratic.next_thinking_step);
+});
+
+test("chat actions require an uploaded document and never fall back to sample content", async () => {
+  for (const action of ["start", "message", "set_mode", "continue", "resume", "finish"]) {
+    await assert.rejects(runGuidedTurn({}, {action,message:"Explain this"}), error=>error.status===422 && /Upload a document/.test(error.message));
+  }
 });

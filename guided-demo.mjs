@@ -1,9 +1,7 @@
-import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { rateLimit } from "express-rate-limit";
 import { readDocument, registerDocumentUpload } from "./guided-documents.mjs";
 
-const { MATERIAL, STEPS } = JSON.parse(readFileSync(new URL("./guided-material.json", import.meta.url)));
 const model = () => process.env.PORTFOLIO_OPENAI_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-mini";
 const turnSchema = {
   type: "object",
@@ -66,14 +64,15 @@ function tutorMessage(lead, question = "", mode = "socrates") {
 function result(messages, state, id, document) {
   const { MATERIAL, STEPS } = document;
   return { messages, socratic: state, conversation_id: id,
-    document_token: document.token || null, document_title: document.title || "Code review practice guide",
+    document_token: document.token || null, document_title: document.title || "Uploaded document",
     tutor_mode: state.tutor_mode || "jarvis",
     steps: STEPS.map(({ title, goal }) => ({ title, goal })), material: MATERIAL };
 }
 
 export async function guidedTurn(client, body = {}) {
   const uploaded = readDocument(body.document_token);
-  const document = uploaded ? { ...uploaded, token: body.document_token } : { MATERIAL, STEPS };
+  if (!uploaded) throw Object.assign(new Error("Upload a document before starting the chat."), { status: 422 });
+  const document = { ...uploaded, token: body.document_token };
   const steps = document.STEPS;
   const requestedMode = body.tutor_mode ?? body.engine_state?.tutor_mode ?? "jarvis";
   const mode = requestedMode === "javis" ? "jarvis" : requestedMode;
