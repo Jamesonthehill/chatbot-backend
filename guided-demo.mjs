@@ -40,13 +40,26 @@ async function structured(client, name, schema, messages) {
 }
 
 const embeddingCache = new Map();
-async function retrieve(client, query, material) {
+async function retrieve(client, query, document) {
+  const material = document.MATERIAL;
   const passages = [];
-  for (let i = 0; i < material.length; i += 1000) passages.push(material.slice(i, i + 1200));
-  const key = createHash("sha256").update(material).digest("hex");
+  const append = (text, page) => {
+    for (let i = 0; i < text.length; i += 1000) {
+      passages.push({ text: text.slice(i, i + 1200), page });
+    }
+  };
+  let start = 0;
+  if (document.title?.toLowerCase().endsWith(".pdf")) {
+    for (const marker of material.matchAll(/^-- (\d+) of \d+ --$/gm)) {
+      append(material.slice(start, marker.index).trim(), Number(marker[1]));
+      start = marker.index + marker[0].length;
+    }
+  }
+  append(material.slice(start).trim());
+  const key = createHash("sha256").update(JSON.stringify(passages)).digest("hex");
   if (!embeddingCache.has(key)) {
     if (embeddingCache.size >= 10) embeddingCache.delete(embeddingCache.keys().next().value);
-    embeddingCache.set(key, client.embeddings.create({ model: "text-embedding-3-small", input: passages })
+    embeddingCache.set(key, client.embeddings.create({ model: "text-embedding-3-small", input: passages.map(({ text }) => text) })
       .then(result => result.data.map(item => item.embedding))
       .catch(error => { embeddingCache.delete(key); throw error; }));
   }
@@ -54,8 +67,8 @@ async function retrieve(client, query, material) {
     embeddingCache.get(key), client.embeddings.create({ model: "text-embedding-3-small", input: query.slice(0, 2000) }),
   ]);
   const vector = result.data[0].embedding;
-  return passages.map((text, i) => ({text, score: vector.reduce((sum, value, j) => sum + value * embeddings[i][j], 0)}))
-    .sort((a,b) => b.score-a.score).slice(0,2).map(item => item.text).join("\n\n");
+  return passages.map((passage, i) => ({...passage, score: vector.reduce((sum, value, j) => sum + value * embeddings[i][j], 0)}))
+    .sort((a,b) => b.score-a.score).slice(0,2);
 }
 function tutorMessage(lead, question = "", mode = "socrates") {
   return { role: "assistant", tutor_mode: mode, content: [lead, question].filter(Boolean).join("\n\n"),
@@ -93,6 +106,7 @@ export async function guidedTurn(client, body = {}) {
     return { role: item.role, content: item.content,
       ...(["jarvis", "socrates"].includes(item.tutor_mode) ? { tutor_mode: item.tutor_mode } : {}),
       ...(Array.isArray(item.sources) ? { sources: item.sources.filter(source => typeof source === "string").slice(0,2).map(source => source.slice(0,2500)) } : {}),
+      ...(Array.isArray(item.source_pages) ? { source_pages: item.source_pages.filter(page => Number.isInteger(page) && page > 0 && page <= 30).slice(0,2) } : {}),
       ...(item.role === "assistant" && typeof item.lead_in === "string" && typeof item.next_thinking_step === "string"
         ? { lead_in: item.lead_in, next_thinking_step: item.next_thinking_step } : {}) };
   });
@@ -148,7 +162,8 @@ export async function guidedTurn(client, body = {}) {
   if (observation.subtopic_request && !state.learning_detour && state.next_thinking_step) {
     state.learning_detour = { question: state.next_thinking_step, scenario: step.scenario };
   }
-  const evidence = await retrieve(client, observation.retrieval_query || message, document.MATERIAL);
+  const passages = await retrieve(client, observation.retrieval_query || message, document);
+  const evidence = passages.map(({ text }) => text).join("\n\n");
   const turn = await structured(client, "guided_tutor_turn", turnSchema, [
     { role: "system", content:
       (mode === "jarvis"
@@ -180,6 +195,7 @@ export async function guidedTurn(client, body = {}) {
     emphasize(state.next_thinking_step, turn.question_emphasis), mode);
   if (!answer.content) throw new Error("The tutor returned an empty reply.");
   answer.sources = [evidence];
+  answer.source_pages = [...new Set(passages.map(({ page }) => page).filter(Boolean))];
   messages.push({ role: "user", content: message }, answer);
   return respond(messages, state, conversation_id);
 }
