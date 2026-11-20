@@ -1,7 +1,9 @@
 import { rateLimit } from "express-rate-limit";
+import { setTimeout as wait } from "node:timers/promises";
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
+const GNEWS_REQUEST_INTERVAL = 1_100;
 const REGIONS = {
   world: { endpoint: "top-headlines", query: { category: "world" } },
   us: { endpoint: "top-headlines", query: { category: "nation", country: "us" } },
@@ -70,7 +72,9 @@ async function getNews(region, key, now) {
     headers: { "X-Api-Key": key },
     signal: AbortSignal.timeout(7_000),
   });
-  if (!response.ok) throw new Error(`GNews returned ${response.status}`);
+  if (!response.ok) {
+    throw Object.assign(new Error("GNews request failed"), { status: response.status });
+  }
   const data = await response.json();
   if (!Array.isArray(data.articles)) throw new Error("Invalid GNews response");
   return selectArticles(data.articles.map((item) => ({
@@ -116,6 +120,21 @@ export function registerCurrentAffairs(app) {
   const limit = Number(process.env.CURRENT_AFFAIRS_DAILY_LIMIT || 60);
   let budgetDay;
   let refreshes = 0;
+  let newsQueue = Promise.resolve();
+  let nextNewsRequestAt = 0;
+
+  function fetchRegion(region, key, now) {
+    // GNews allows one request per second on its Free plan. Space out cache
+    // misses across regions, including visits from different browsers.
+    const job = newsQueue.then(async () => {
+      const delay = nextNewsRequestAt - performance.now();
+      if (delay > 0) await wait(delay);
+      nextNewsRequestAt = performance.now() + GNEWS_REQUEST_INTERVAL;
+      return getNews(region, key, now);
+    });
+    newsQueue = job.catch(() => {});
+    return job;
+  }
 
   app.get("/api/current-affairs", rateLimit({
     windowMs: MINUTE, limit: 20, standardHeaders: "draft-8", legacyHeaders: false,
@@ -147,7 +166,7 @@ export function registerCurrentAffairs(app) {
       if ((retryAfter.get(region) || 0) > now || refreshes >= limit) return fallback();
       refreshes += 1;
       pending.set(region, (async () => {
-        const articles = await getNews(REGIONS[region], key, now);
+        const articles = await fetchRegion(REGIONS[region], key, now);
         try {
           await addGroqSummaries(articles, process.env.GROQ_API_KEY);
         } catch {
